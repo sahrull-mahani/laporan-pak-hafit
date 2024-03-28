@@ -2,13 +2,20 @@
 
 namespace App\Controllers;
 
+use DateTime;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Color;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\HeaderFooterDrawing;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class Home extends BaseController
 {
+    function __construct()
+    {
+        helper('my_helpers');
+    }
     public function index(): string
     {
         return view('welcome_message');
@@ -16,8 +23,44 @@ class Home extends BaseController
 
     public function save()
     {
+        $nama_sekolah = $this->request->getPost('nama_sekolah');
+        $nama_guru = $this->request->getPost('nama_guru');
+        $mata_pelajaran = $this->request->getPost('mata_pelajaran');
+        $status_guru = $this->request->getPost('status_guru');
+        $jjp = $this->request->getPost('jjp');
+        session()->set([
+            'nama_sekolah'      => $nama_sekolah,
+            'nama_guru'         => $nama_guru,
+            'mata_pelajaran'    => $mata_pelajaran,
+            'status_guru'       => $status_guru,
+            'jjp'               => $jjp,
+        ]);
+
+        $tanggal = $this->request->getPost('tanggal');
+        $formatTGL = tanggalFormat($tanggal);
+        $materi = $this->request->getPost('materi');
+        $kelas = @$this->request->getPost('kelas');
+        $mapel = @$this->request->getPost('mapel');
+        $jumlah = $this->request->getPost('jumlah');
+        $jumlah = $jumlah > 0 ? $jumlah : null;
+        $hadir = $this->request->getPost('hadir');
+        $hadir = $hadir > 0 ? $hadir : null;
+        $tidak_hadir = $this->request->getPost('tidak_hadir');
+        $tidak_hadir = $tidak_hadir > 0 ? $tidak_hadir : null;
+        $alasan = $this->request->getPost('alasan');
+        $dokumentasi = $this->request->getFile('dokumentasi');
+        $dokumentasiname = $dokumentasi->getRandomName();
+        if (!$this->upload_img($dokumentasiname, $dokumentasi)) {
+            return response()->setJSON(['success' => false, 'message' => session()->getFlashdata('error')]);
+        }
+        $dokumentasi = [
+            'thumb' => WRITEPATH . "uploads/thumbs/$dokumentasiname",
+            'full' => WRITEPATH . "uploads/img/$dokumentasiname",
+        ];
+        $dokumentasi = json_decode(json_encode($dokumentasi));
+        $keterangan = $this->request->getPost('keterangan');
+
         $spreadsheet = new Spreadsheet();
-        $activesheet = $spreadsheet->getActiveSheet();
 
         $spreadsheet->getProperties()
             ->setCreator("MSM")
@@ -30,7 +73,10 @@ class Home extends BaseController
             ->setKeywords("Codeigniter 4 Genrate Exclsx Jurnal")
             ->setCategory("Journal/Report MSM");
 
-        $spreadsheet->getActiveSheet()->setTitle(date('F'));
+        $monthsheet = replaceBulan(date('M'));
+        $spreadsheet->getActiveSheet()->setTitle($monthsheet);
+        // $activesheet = $spreadsheet->getActiveSheet();
+        $activesheet = $spreadsheet->getSheetByName($monthsheet);
 
         // FORMAT ================================================================>
         #WIDTH
@@ -57,6 +103,7 @@ class Home extends BaseController
         for ($r = 12; $r <= 15; $r++) {
             $activesheet->getRowDimension($r)->setRowHeight(39.75);
         }
+        $activesheet->getRowDimension(20)->setRowHeight(100);
 
         #MERGE
         $activesheet->mergeCells('B1:K1'); // judul
@@ -83,6 +130,8 @@ class Home extends BaseController
         $activesheet->getStyle('B8:K15')->getAlignment()->setWrapText(true);
         $activesheet->getStyle('A17:K19')->getAlignment()->setHorizontal('center');
         $activesheet->getStyle('A17:K19')->getAlignment()->setWrapText(true);
+        $activesheet->getStyle('A20:K20')->getAlignment()->setHorizontal('center');
+        $activesheet->getStyle('A20:K20')->getAlignment()->setWrapText(true);
 
         #PAPERSIZE & ORIENTATION
         $spreadsheet->getActiveSheet()->getPageSetup()
@@ -128,19 +177,19 @@ class Home extends BaseController
         $spreadsheet->getActiveSheet()->getPageMargins()->setBottom(1);
         // END FORMAT ================================================================>
 
-        // VALUE
+        // VALUE =========================================================================>
         #TOP
         $activesheet->setCellValue('B1', 'JURNAL KEGIATAN HARIAN / PEMBELAJARAN BULAN MARET ' . date('Y')); // judul
         $activesheet->setCellValue('B3', 'NAMA SEKOLAH');
-        $activesheet->setCellValue('D3', ': ' . $this->request->getPost('nama_sekolah'));
+        $activesheet->setCellValue('D3', ': ' . $nama_sekolah);
         $activesheet->setCellValue('B4', 'NAMA GURU');
-        $activesheet->setCellValue('D4', ': ' . $this->request->getPost('nama_guru'));
+        $activesheet->setCellValue('D4', ': ' . $nama_guru);
         $activesheet->setCellValue('B5', 'MATA PELAJARAN');
-        $activesheet->setCellValue('D5', ': ' . $this->request->getPost('mata_pelajaran'));
+        $activesheet->setCellValue('D5', ': ' . $mata_pelajaran);
         $activesheet->setCellValue('B6', 'STATUS GURUsasad');
-        $activesheet->setCellValue('D6', ': ' . $this->request->getPost('status_guru'));
+        $activesheet->setCellValue('D6', ': ' . $status_guru);
         $activesheet->setCellValue('B7', 'JJP KBM PER MINGGU');
-        $activesheet->setCellValue('D7', ': ' . $this->request->getPost('jjp'));
+        $activesheet->setCellValue('D7', ': ' . $jjp);
 
         #MID TOP
         $activesheet->setCellValue('B8', 'Kelas X');
@@ -181,15 +230,83 @@ class Home extends BaseController
         $activesheet->setCellValue('I17', 'MASALAH/ALASAN');
         $activesheet->setCellValue('J17', 'DOKUMENTASI');
         $activesheet->setCellValue('K17', 'KET/TEMPAT KEGIATAN');
-        // END VALUE
+
+        #MAIN {DYNAMIC}
+        $maData = [
+            ['1', $formatTGL, $materi, $kelas, $mapel, $jumlah, $hadir, $tidak_hadir, $alasan, NULL, $keterangan]
+        ];
+        $drawing = new Drawing();
+        $drawing->setName('Dokumentasi');
+        $drawing->setDescription('Doc pertamasadasdsa');
+        $drawing->setPath($dokumentasi->full);
+        $drawing->setCoordinates('J20');
+        $drawing->setWidthAndHeight(135, 135);
+        $drawing->setOffsetX(15);
+        $drawing->setWorksheet($activesheet);
+        $activesheet->fromArray($maData, NULL, 'A20');
+        // END VALUE =========================================================================>
+
+        // CLONE WORK SHEET
+        $checkBulan = new DateTime((string)$tanggal);
+        $checkBulan = date('M', $checkBulan->getTimestamp());
+        if (date('M') != $checkBulan) {
+            $clonedWorksheet = clone $spreadsheet->getSheetByName($monthsheet);
+            $clonedWorksheet->setTitle(replaceBulan($checkBulan));
+            $spreadsheet->addSheet($clonedWorksheet);
+            $spreadsheet->setActiveSheetIndexByName(replaceBulan($checkBulan));
+        }
 
         $writer = new Xlsx($spreadsheet);
-        $filename = 'laporan' . time() . '.xlsx';
+        if (!is_dir('laporan')) {
+            mkdir('laporan');
+        }
+        $filename = 'laporan/laporan' . time() . '.xlsx';
         $writer->save($filename);
         if (file_exists($filename)) {
             return response()->setJSON(['success' => true, 'message' => 'Data succeed created']);
         } else {
             return response()->setJSON(['success' => false, 'message' => 'Data failed created'])->setStatusCode(400, 'Tidak bisa buat berkas!');
+        }
+    }
+
+    private function upload_img($file_name, $img): bool
+    {
+        $max = 5;
+        $filesize = $max * 1024;
+        $validationRule = [
+            'dokumentasi' => [
+                'label' => 'IMG File',
+                'rules' => 'uploaded[dokumentasi]'
+                    . '|is_image[dokumentasi]'
+                    . '|mime_in[dokumentasi,image/jpg,image/jpeg,image/png]'
+                    . "|max_size[dokumentasi,$filesize]",
+                'errors' => [
+                    'uploaded'  => 'Pastikan sudah memasukan gambar',
+                    'is_image'  => 'Pastikan yang di upload adalah gambar',
+                    'mime_in'   => 'Extensi yang boleh [jpg,jpeg,png]',
+                    'max_size'  => "Ukuran gambar terlalu besar MAX {$max}MB",
+                ]
+            ],
+        ];
+        if (!$this->validate($validationRule)) {
+            session()->setFlashdata('error', $this->validator->getError('dokumentasi'));
+            return false;
+        }
+        $filepath = WRITEPATH . 'uploads/';
+
+        if (!$img->hasMoved()) {
+
+            if (!is_dir($filepath . 'img')) mkdir($filepath . 'img');
+            if (!is_dir($filepath . 'thumbs')) mkdir($filepath . 'thumbs');
+
+            $image = \Config\Services::image('gd'); //Load Image Libray
+            $image->withFile($img)->save($filepath . 'img/' . $file_name);
+            //thumbs
+            $image->withFile($img)->fit(500, 500, 'center')->save($filepath . 'thumbs/' . $file_name);
+            return true;
+        } else {
+            session()->setFlashdata('error', $img->getErrorString() . '(' . $img->getError() . ')');
+            return false;
         }
     }
 }
