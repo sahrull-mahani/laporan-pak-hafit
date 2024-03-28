@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Models\MainM;
 use DateTime;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -12,9 +13,11 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class Home extends BaseController
 {
+    protected $mainm;
     function __construct()
     {
         helper('my_helpers');
+        $this->mainm = new MainM();
     }
     public function index(): string
     {
@@ -37,7 +40,6 @@ class Home extends BaseController
         ]);
 
         $tanggal = $this->request->getPost('tanggal');
-        $formatTGL = tanggalFormat($tanggal);
         $materi = $this->request->getPost('materi');
         $kelas = @$this->request->getPost('kelas');
         $mapel = @$this->request->getPost('mapel');
@@ -49,15 +51,6 @@ class Home extends BaseController
         $tidak_hadir = $tidak_hadir > 0 ? $tidak_hadir : null;
         $alasan = $this->request->getPost('alasan');
         $dokumentasi = $this->request->getFile('dokumentasi');
-        $dokumentasiname = $dokumentasi->getRandomName();
-        if (!$this->upload_img($dokumentasiname, $dokumentasi)) {
-            return response()->setJSON(['success' => false, 'message' => session()->getFlashdata('error')]);
-        }
-        $dokumentasi = [
-            'thumb' => WRITEPATH . "uploads/thumbs/$dokumentasiname",
-            'full' => WRITEPATH . "uploads/img/$dokumentasiname",
-        ];
-        $dokumentasi = json_decode(json_encode($dokumentasi));
         $keterangan = $this->request->getPost('keterangan');
 
         $spreadsheet = new Spreadsheet();
@@ -232,17 +225,53 @@ class Home extends BaseController
         $activesheet->setCellValue('K17', 'KET/TEMPAT KEGIATAN');
 
         #MAIN {DYNAMIC}
-        $maData = [
-            ['1', $formatTGL, $materi, $kelas, $mapel, $jumlah, $hadir, $tidak_hadir, $alasan, NULL, $keterangan]
-        ];
-        $drawing = new Drawing();
-        $drawing->setName('Dokumentasi');
-        $drawing->setDescription('Doc pertamasadasdsa');
-        $drawing->setPath($dokumentasi->full);
-        $drawing->setCoordinates('J20');
-        $drawing->setWidthAndHeight(135, 135);
-        $drawing->setOffsetX(15);
-        $drawing->setWorksheet($activesheet);
+        $dokumentasiname = "image $tanggal." . $dokumentasi->getClientExtension();
+        if (!$this->upload_img($dokumentasiname, $dokumentasi)) {
+            return response()->setJSON(['success' => false, 'message' => session()->getFlashdata('error')]);
+        }
+        $timestamp = new DateTime((string)$tanggal);
+        $timestamp = $timestamp->getTimestamp();
+        if (!$this->mainm->insert([
+            'tanggal'       => date('Y-m-d', $timestamp),
+            'materi'        => $materi,
+            'kelas'         => $kelas,
+            'mapel'         => $mapel,
+            'jumlah'        => $jumlah,
+            'hadir'         => $hadir,
+            'tidak_hadir'   => $tidak_hadir,
+            'alasan'        => $alasan,
+            'dokumentasi'   => $dokumentasiname,
+            'keterangan'    => $keterangan
+        ])) {
+            return response()->setJSON(['success' => false, 'messages' => $this->mainm->errors()]);
+        }
+        $jurnals = $this->mainm->where('tanggal', date('Y-m-d', $timestamp))->findAll();
+        foreach ($jurnals as $key => $data) {
+            $no = $key +1;
+            $row = $key + 20;
+            $dokumentasi = WRITEPATH . "uploads/img/$data->dokumentasi";
+            $maData[] = [
+                $no,
+                tanggalFormat($data->tanggal),
+                $data->materi,
+                $data->kelas,
+                $data->mapel,
+                $data->jumlah,
+                $data->hadir,
+                $data->tidak_hadir,
+                $data->alasan,
+                NULL,
+                $data->keterangan,
+            ];
+            $drawing = new Drawing();
+            $drawing->setName("Dokumentasi $row");
+            $drawing->setDescription("Doc pertamasadasdsa $row");
+            $drawing->setPath($dokumentasi);
+            $drawing->setCoordinates("J$row");
+            $drawing->setWidthAndHeight(135, 135);
+            $drawing->setOffsetX(15);
+            $drawing->setWorksheet($activesheet);
+        }
         $activesheet->fromArray($maData, NULL, 'A20');
         // END VALUE =========================================================================>
 
