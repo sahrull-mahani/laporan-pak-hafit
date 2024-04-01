@@ -96,7 +96,6 @@ class Home extends BaseController
         for ($r = 12; $r <= 15; $r++) {
             $activesheet->getRowDimension($r)->setRowHeight(39.75);
         }
-        $activesheet->getRowDimension(20)->setRowHeight(100);
 
         #MERGE
         $activesheet->mergeCells('B1:K1'); // judul
@@ -123,8 +122,6 @@ class Home extends BaseController
         $activesheet->getStyle('B8:K15')->getAlignment()->setWrapText(true);
         $activesheet->getStyle('A17:K19')->getAlignment()->setHorizontal('center');
         $activesheet->getStyle('A17:K19')->getAlignment()->setWrapText(true);
-        $activesheet->getStyle('A20:K20')->getAlignment()->setHorizontal('center');
-        $activesheet->getStyle('A20:K20')->getAlignment()->setWrapText(true);
 
         #PAPERSIZE & ORIENTATION
         $spreadsheet->getActiveSheet()->getPageSetup()
@@ -225,9 +222,11 @@ class Home extends BaseController
         $activesheet->setCellValue('K17', 'KET/TEMPAT KEGIATAN');
 
         #MAIN {DYNAMIC}
-        $dokumentasiname = "image $tanggal." . $dokumentasi->getClientExtension();
-        if (!$this->upload_img($dokumentasiname, $dokumentasi)) {
-            return response()->setJSON(['success' => false, 'message' => session()->getFlashdata('error')]);
+        $dokumentasiname = $dokumentasi->getRandomName();
+        if ($dokumentasi->getError() !== 4) {
+            if (!$this->upload_img($dokumentasiname, $dokumentasi)) {
+                return response()->setJSON(['success' => false, 'message' => session()->getFlashdata('error')])->setStatusCode(400, 'Tidak bisa buat berkas!');
+            }
         }
         $timestamp = new DateTime((string)$tanggal);
         $timestamp = $timestamp->getTimestamp();
@@ -243,13 +242,13 @@ class Home extends BaseController
             'dokumentasi'   => $dokumentasiname,
             'keterangan'    => $keterangan
         ])) {
-            return response()->setJSON(['success' => false, 'messages' => $this->mainm->errors()]);
+            return response()->setJSON(['success' => false, 'messages' => $this->mainm->errors()])->setStatusCode(400, 'Tidak bisa buat berkas!');
         }
-        $jurnals = $this->mainm->where('tanggal', date('Y-m-d', $timestamp))->findAll();
+        $jurnals = $this->mainm->findAll();
         foreach ($jurnals as $key => $data) {
-            $no = $key +1;
+            $no = $key + 1;
             $row = $key + 20;
-            $dokumentasi = WRITEPATH . "uploads/img/$data->dokumentasi";
+            $image = WRITEPATH . "uploads/img/$data->dokumentasi";
             $maData[] = [
                 $no,
                 tanggalFormat($data->tanggal),
@@ -263,10 +262,36 @@ class Home extends BaseController
                 NULL,
                 $data->keterangan,
             ];
+
+            // if ($data->tanggal == date('Y-m-d', $timestamp) && count($jurnals) > 1) {
+            //     $nexRow = $row + 1;
+            //     print_r($key);
+            //     $activesheet->mergeCells("A$row:A$nexRow");
+            // }
+
+            // #FORMAT {DYNAMIC}
+            $activesheet->getStyle("A$row:K$row")->getAlignment()->setHorizontal('center');
+            $activesheet->getStyle("A$row:K$row")->getAlignment()->setWrapText(true);
+            $activesheet->getRowDimension($row)->setRowHeight(100);
+            foreach (range('A', 'K') as $col) {
+                $activesheet->getStyle("$col$row")->getBorders()->getOutline()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('00000000'));
+            }
+
+            // LAST WEEK
+            if (hari(date('D', $timestamp)) == 'Jumat') {
+                $rowAdd = $row + 1;
+                $activesheet->setCellValue("A$rowAdd", "Jumlah Jam KBM per Minggu = $jjp JP");
+                $activesheet->getStyle("A$rowAdd:K$rowAdd")->getAlignment()->setHorizontal('center');
+                $activesheet->getStyle("A$rowAdd:K$rowAdd")->getAlignment()->setWrapText(true);
+                $activesheet->getStyle("A$rowAdd")->getFont()->setBold(true);
+                $activesheet->mergeCells("A$rowAdd:K$rowAdd");
+            }
+
+            if ($dokumentasi->getError() === 4) continue;
             $drawing = new Drawing();
             $drawing->setName("Dokumentasi $row");
             $drawing->setDescription("Doc pertamasadasdsa $row");
-            $drawing->setPath($dokumentasi);
+            $drawing->setPath($image);
             $drawing->setCoordinates("J$row");
             $drawing->setWidthAndHeight(135, 135);
             $drawing->setOffsetX(15);
@@ -289,7 +314,7 @@ class Home extends BaseController
         if (!is_dir('laporan')) {
             mkdir('laporan');
         }
-        $filename = 'laporan/laporan' . time() . '.xlsx';
+        $filename = 'laporan/laporan' . '.xlsx';
         $writer->save($filename);
         if (file_exists($filename)) {
             return response()->setJSON(['success' => true, 'message' => 'Data succeed created']);
